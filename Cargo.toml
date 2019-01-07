@@ -1,0 +1,10 @@
+[package]
+name = "pac_fca"
+version = "0.1.0"
+authors = ["Tomarchelone <zolotuhinden@bk.ru>"]
+edition = "2018"
+
+[dependencies]
+rand = "0.6.3"
+num-bigint = "0.2.2"
+num-traits = "0.2.6"
