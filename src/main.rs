@@ -66,6 +66,46 @@ impl ImplicationSet {
     }
 }
 
+use std::fmt;
+impl fmt::Display for ImplicationSet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let M = self.set[0].from.len();
+        let mut buf = String::new();
+        for imp in &self.set {
+            let mut assumption = "{".to_string();
+            let mut new = true;
+            for i in 0..M {
+                if imp.from[i] {
+                    if new {
+                        assumption.push_str(&format!("{}", i + 2));
+                        new = false;
+                    } else {
+                        assumption.push_str(&format!(", {}", i + 2));
+                    }
+                }
+            }
+            assumption.push('}');
+
+            let mut conclusion = "{".to_string();
+            let mut new = true;
+            for i in 0..M {
+                if imp.to[i] {
+                    if new {
+                        conclusion.push_str(&format!("{}", i + 2));
+                        new = false;
+                    } else {
+                        conclusion.push_str(&format!(", {}", i + 2));
+                    }
+                }
+            }
+            conclusion.push('}');
+
+            buf.push_str(&format!("{} -> {}\n", assumption, conclusion));
+        }
+        write!(f, "{}", buf)
+    }
+}
+
 fn extend(l: &Vec<bool>, e: &Vec<bool>) -> Vec<bool> {
     let mut l_new = l.clone();
     for i in 0..l.len() {
@@ -94,38 +134,51 @@ fn random_subset(M: usize) -> Vec<bool> {
     l
 }
 
-// parallel search
+
 extern crate rayon;
 use rayon::prelude::*;
-fn probably_explored(M: usize  // Attribute set 0..M
-                     , K: &Context  // Context
-                     , L: &ImplicationSet  // Implication set
-                     , eps: f64
-                     , delta: f64
-                     , j: u64) -> Option<Implication>
+
+fn probably_explored(
+    M: usize  // Attribute set 0..M
+    , K: &Context  // Context
+    , L: &ImplicationSet  // Implication set
+    , eps: f64
+    , delta: f64
+    , j: u64
+)
+    -> Option<Implication>
 {
     match (0..((1.0/eps).ceil() as u64 * (j + (1.0/delta).ln().ceil() as u64)))
-             .into_par_iter()
-             .map(|_| {
-                 let mut l = random_subset(M);
-                 l = L.close(&l);  // L-closure of l
-                 let r = K.allows(&l);  // largest subset not refuted by K
-                 if l != r {
-                     return Some(Implication {from: l, to: r})  // "l -> r" is undecided
-                 }
-                 return None;
-             })
-             .find_any(|x| match x {Some(_) => true, _ => false}) {
+          .into_par_iter() // parallel search
+          .map(|_| {
+              let mut l = random_subset(M);
+              l = L.close(&l);  // L-closure of l
+              let r = K.allows(&l);  // largest subset not refuted by K
+              if l != r {
+                  return Some(Implication {from: l, to: r})  // "l -> r" is undecided
+              }
+              return None;
+          })
+          .find_any(
+              |x| match x {
+                  Some(_) => true,
+                  _ => false,
+              }
+          )
+    {
         Some(imp) => return imp,
         None => return None,
     }
 }
 
-fn pac_attribute_exploration(M: usize
-                             , K_0: Context
-                             , eps: f64
-                             , delta: f64
-                             , oracle: &Oracle) -> (ImplicationSet, Context)
+fn pac_attribute_exploration(
+    M: usize
+    , K_0: Context
+    , eps: f64
+    , delta: f64
+    , oracle: &Oracle
+)
+    -> (ImplicationSet, Context)
 {
     let mut K = K_0; // initial context
     let mut L = ImplicationSet {set: vec![]};
@@ -169,8 +222,6 @@ use num_bigint::BigUint;
 use num_bigint::ToBigUint;
 use num_traits::{Zero, One};
 
-struct DivOracle {}  // Oracle for numbers and divisibility
-
 fn gcd(a: &BigUint, b: &BigUint) -> BigUint {
     let (mut a, mut b) = (a.clone(), b.clone());
     while b != Zero::zero() {
@@ -185,6 +236,7 @@ fn lcm(a: BigUint, b: BigUint) -> BigUint {
     (&a * &b) / gcd(&a, &b)
 }
 
+struct DivOracle {}  // Oracle for numbers and divisibility
 
 impl Oracle for DivOracle {
     // НОК левой части должно делиться на всё, что в правой части
@@ -217,52 +269,23 @@ impl Oracle for DivOracle {
     }
 }
 
-
 fn main() {
     let oracle = DivOracle {};
-    let M = 15;
+    let M = 14;
     let eps = 0.1;
     let delta = 0.1;
+
     let mut stamp = Instant::now();
-    let (imp_set, context) = pac_attribute_exploration(M
-                                                       , Context {M, context: vec![]}
-                                                       , eps
-                                                       , delta
-                                                       , &oracle);
+    let (imp_set, context) = pac_attribute_exploration(
+                                M
+                                , Context {M, context: vec![]}
+                                , eps
+                                , delta
+                                , &oracle
+                            );
     let elapsed = stamp.elapsed();
 
-    for imp in &imp_set.set {
-        let mut assumption = "{".to_string();
-        let mut new = true;
-        for i in 0..M {
-            if imp.from[i] {
-                if new {
-                    assumption.push_str(&format!("{}", i + 2));
-                    new = false;
-                } else {
-                    assumption.push_str(&format!(", {}", i + 2));
-                }
-            }
-        }
-        assumption.push('}');
-
-        let mut conclusion = "{".to_string();
-        let mut new = true;
-        for i in 0..M {
-            if imp.to[i] {
-                if new {
-                    conclusion.push_str(&format!("{}", i + 2));
-                    new = false;
-                } else {
-                    conclusion.push_str(&format!(", {}", i + 2));
-                }
-            }
-        }
-        conclusion.push('}');
-
-        println!("{} -> {}", assumption, conclusion);
-    }
-
-    println!("Elapsed: {:?}", stamp.elapsed());
-    println!("Size of implication set: {}", imp_set.set.len());
+    println!("{}", imp_set);
+    println!("[Elapsed: {:?}]", stamp.elapsed());
+    println!("[Size of implication set: {}]", imp_set.set.len());
 }
