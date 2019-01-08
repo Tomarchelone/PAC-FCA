@@ -1,9 +1,9 @@
 extern crate rand;
 
 use rand::random;
+use std::time::Instant;
 
 // All pods are fods here
-// TODO: быстрый алгос для замыканий (linear closure)
 
 trait Oracle {
     fn is_refuted(&self, imp: &Implication) -> Option<(Vec<bool>, Vec<bool>)>;
@@ -30,6 +30,7 @@ impl Context {
     }
 }
 
+#[derive(Clone)]
 struct Implication {
     pub from: Vec<bool>,
     pub to: Vec<bool>,
@@ -40,7 +41,7 @@ struct ImplicationSet {
 }
 
 impl ImplicationSet {
-    // Самый примитивный алгос
+    // Самый примитивный алгоритм
     fn close(&self, l: &Vec<bool>) -> Vec<bool> {
         let mut l = l.clone();
         let mut used = vec![false; self.set.len()];  // if implication is used it cannot be used later
@@ -93,6 +94,9 @@ fn random_subset(M: usize) -> Vec<bool> {
     l
 }
 
+// parallel search
+extern crate rayon;
+use rayon::prelude::*;
 fn probably_explored(M: usize  // Attribute set 0..M
                      , K: &Context  // Context
                      , L: &ImplicationSet  // Implication set
@@ -100,16 +104,21 @@ fn probably_explored(M: usize  // Attribute set 0..M
                      , delta: f64
                      , j: u64) -> Option<Implication>
 {
-    for k in 0..((1.0/eps).ceil() as u64 * (j + (1.0/delta).ln().ceil() as u64)) {
-        let mut l = random_subset(M);
-        l = L.close(&l);  // L-closure of l
-        let r = K.allows(&l);  // largest subset not refuted by K
-        if l != r {
-            return Some(Implication {from: l, to: r})  // "l -> r" is undecided
-        }
+    match (0..((1.0/eps).ceil() as u64 * (j + (1.0/delta).ln().ceil() as u64)))
+             .into_par_iter()
+             .map(|_| {
+                 let mut l = random_subset(M);
+                 l = L.close(&l);  // L-closure of l
+                 let r = K.allows(&l);  // largest subset not refuted by K
+                 if l != r {
+                     return Some(Implication {from: l, to: r})  // "l -> r" is undecided
+                 }
+                 return None;
+             })
+             .find_any(|x| match x {Some(_) => true, _ => false}) {
+        Some(imp) => return imp,
+        None => return None,
     }
-
-    return None
 }
 
 fn pac_attribute_exploration(M: usize
@@ -135,9 +144,11 @@ fn pac_attribute_exploration(M: usize
                     }
                     None => {
                         L.set.push(imp);
+                        /*
                         for i in 0..K.context.len() {
                             K.context[i].0 = L.close(&K.context[i].0);
                         }
+                        */
                     }
                 }
             },
@@ -174,8 +185,9 @@ fn lcm(a: BigUint, b: BigUint) -> BigUint {
     (&a * &b) / gcd(&a, &b)
 }
 
-// НОК левой части должно делиться на всё, что в правой части
+
 impl Oracle for DivOracle {
+    // НОК левой части должно делиться на всё, что в правой части
     fn is_refuted(&self, imp: &Implication) -> Option<(Vec<bool>, Vec<bool>)> {
         let M = imp.from.len();
         let mut l = One::one();
@@ -208,14 +220,16 @@ impl Oracle for DivOracle {
 
 fn main() {
     let oracle = DivOracle {};
-    let M = 14;
-    let eps = 0.01;
-    let delta = 0.01;
+    let M = 15;
+    let eps = 0.1;
+    let delta = 0.1;
+    let mut stamp = Instant::now();
     let (imp_set, context) = pac_attribute_exploration(M
                                                        , Context {M, context: vec![]}
                                                        , eps
                                                        , delta
                                                        , &oracle);
+    let elapsed = stamp.elapsed();
 
     for imp in &imp_set.set {
         let mut assumption = "{".to_string();
@@ -249,5 +263,6 @@ fn main() {
         println!("{} -> {}", assumption, conclusion);
     }
 
+    println!("Elapsed: {:?}", stamp.elapsed());
     println!("Size of implication set: {}", imp_set.set.len());
 }
