@@ -3,26 +3,23 @@ extern crate rand;
 use rand::random;
 use std::time::Instant;
 
-// Векторизовать операции с множествами?
-// All pods are fods here
-
 pub trait Oracle {
-    fn is_refuted(&self, imp: &Implication) -> Option<(Vec<bool>, Vec<bool>)>;
+    fn is_refuted(&self, imp: &Implication) -> Option<(Vec<u128>, Vec<u128>)>;
 }
 
 pub struct Context {
     pub M: usize,  // size of attribute set
-    pub context: Vec<(Vec<bool>, Vec<bool>)>,  // pod-s
+    pub context: Vec<(Vec<u128>, Vec<u128>)>,  // pod-s
 }
 
 impl Context {
-    fn allows(&self, p: &Vec<bool>) -> Vec<bool> {
-        let mut ret = vec![true; self.M];
+    fn allows(&self, p: &Vec<u128>) -> Vec<u128> {
+        let mut ret = full_set(self.M);
         for (a, s) in &self.context {
             if is_subset(p, a) {
                 for i in 0..self.M {
-                    if s[i] {
-                        ret[i] = false;
+                    if contains(s, i) {
+                        remove(&mut ret, i);
                     }
                 }
             }
@@ -33,17 +30,18 @@ impl Context {
 
 #[derive(Clone)]
 pub struct Implication {
-    pub from: Vec<bool>,
-    pub to: Vec<bool>,
+    pub from: Vec<u128>,
+    pub to: Vec<u128>,
 }
 
 pub struct ImplicationSet {
+    M: usize,
     pub set: Vec<Implication>,
 }
 
 impl ImplicationSet {
     // Самый примитивный алгоритм
-    fn close(&self, l: &Vec<bool>) -> Vec<bool> {
+    fn close(&self, l: &Vec<u128>) -> Vec<u128> {
         let mut l = l.clone();
         let mut used = vec![false; self.set.len()];  // if implication is used it cannot be used later
         let mut closed = false;
@@ -54,7 +52,8 @@ impl ImplicationSet {
                     continue;
                 }
                 if is_subset(&self.set[i].from, &l) {
-                    let l_new = union(&l, &self.set[i].to);
+                    let mut l_new = l.clone();
+                    union(&mut l_new, &self.set[i].to);
                     if l_new != l {
                         closed = false;
                         l = l_new;
@@ -70,13 +69,13 @@ impl ImplicationSet {
 use std::fmt;
 impl fmt::Display for ImplicationSet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let M = self.set[0].from.len();
+        let M = self.M;
         let mut buf = String::new();
         for imp in &self.set {
             let mut assumption = "{".to_string();
             let mut new = true;
             for i in 0..M {
-                if imp.from[i] {
+                if contains(&imp.from, i) {
                     if new {
                         assumption.push_str(&format!("{}", i + 2));
                         new = false;
@@ -90,7 +89,7 @@ impl fmt::Display for ImplicationSet {
             let mut conclusion = "{".to_string();
             let mut new = true;
             for i in 0..M {
-                if imp.to[i] {
+                if contains(&imp.to, i) {
                     if new {
                         conclusion.push_str(&format!("{}", i + 2));
                         new = false;
@@ -107,32 +106,93 @@ impl fmt::Display for ImplicationSet {
     }
 }
 
-fn union(l: &Vec<bool>, e: &Vec<bool>) -> Vec<bool> {
-    let mut l_new = l.clone();
-    for i in 0..l.len() {
-        if e[i] {
-            l_new[i] = true;
-        }
+#[inline]
+pub fn full_set(M: usize) -> Vec<u128> {
+    let chunks = M / 128;
+    let rem = M % 128;
+    let mut ret = vec![u128::max_value(); chunks];
+    if rem != 0 {
+        ret.push(u128::max_value() >> (128 - rem));
     }
-    l_new
+    ret
 }
 
-fn is_subset(sub: &Vec<bool>, set: &Vec<bool>) -> bool {
+#[inline]
+pub fn empty_set(M: usize) -> Vec<u128> {
+    let chunks = M / 128;
+    let rem = M % 128;
+    if rem == 0 {
+        vec![0_u128; chunks]
+    } else {
+        vec![0_u128; chunks + 1]
+    }
+}
+
+#[inline]
+pub fn not(set: &Vec<u128>, M: usize) -> Vec<u128> {
+    let chunks = M / 128;
+    let rem = M % 128;
+    let mut ret = vec![0_u128; chunks];
+    for i in 0..chunks {
+        ret[i] = !set[i];
+    }
+    if rem != 0 {
+        ret.push((!set[chunks] << (128 - rem)) >> (128 - rem));
+    }
+    ret
+}
+
+#[inline]
+pub fn contains(set: &Vec<u128>, elem: usize) -> bool {
+    let chunk = elem / 128;
+    let bit = elem % 128;
+    (set[chunk] & (1_u128 << bit)) != 0_u128
+}
+
+#[inline]
+pub fn add(set: &mut Vec<u128>, elem: usize) {
+    let chunk = elem / 128;
+    let bit = elem % 128;
+    set[chunk] = set[chunk] | (1_u128 << bit);
+}
+
+#[inline]
+pub fn remove(set: &mut Vec<u128>, elem: usize) {
+    let chunk = elem / 128;
+    let bit = elem % 128;
+    set[chunk] = set[chunk] & !(1_u128 << bit);
+}
+
+#[inline]
+fn union(l: &mut Vec<u128>, e: &Vec<u128>) {
+    for i in 0..l.len() {
+        l[i] = l[i] | e[i];
+    }
+}
+
+#[inline]
+fn is_subset(sub: &Vec<u128>, set: &Vec<u128>) -> bool {
     for i in 0..sub.len() {
-        if sub[i] && !set[i] {
-            return false;
+        if !(sub[i] & (!set[i]) == 0_u128) {
+            return false
         }
     }
     true
 }
 
-
-fn random_subset(M: usize) -> Vec<bool> {
-    let mut l = vec![false; M];
-    for i in 0..M {
-        l[i] = random();
+#[inline]
+fn random_subset(M: usize) -> Vec<u128> {
+    let chunks = M / 128;
+    let rem = M % 128;
+    let mut ret = vec![0_u128; chunks];
+    for i in 0..chunks {
+        ret[i] = rand::random::<u128>();
     }
-    l
+    let tail: u128 = rand::random();
+    if rem != 0 {
+        ret.push(tail >> (128 - rem));
+    }
+    ret
 }
 
 
@@ -182,14 +242,14 @@ pub fn pac_attribute_exploration(
     -> (ImplicationSet, Context)
 {
     let mut K = K_0; // initial context
-    let mut L = ImplicationSet {set: vec![]};
+    let mut L = ImplicationSet {M, set: vec![]};
     let mut j = 1;
     loop {
         match probably_explored(M, &K, &L, eps, delta, j) {
             Some(mut imp) => {
                 for i in 0..M {  // transform it to (l -> r \ l)
-                    if imp.from[i] {
-                        imp.to[i] = false;
+                    if contains(&imp.from, i) {
+                        remove(&mut imp.to, i);
                     }
                 }
                 match oracle.is_refuted(&imp) {
