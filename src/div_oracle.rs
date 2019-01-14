@@ -53,4 +53,8 @@ impl Oracle for DivOracle {
         }
         None
     }
+
+    fn is_member(&self, example: &Vec<u128>) -> bool {
+        true
+    }
 }

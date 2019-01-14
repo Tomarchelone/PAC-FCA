@@ -5,6 +5,8 @@ use std::time::Instant;
 
 pub trait Oracle {
     fn is_refuted(&self, imp: &Implication) -> Option<(Vec<u128>, Vec<u128>)>;
+
+    fn is_member(&self, example: &Vec<u128>) -> bool;
 }
 
 pub struct Context {
@@ -28,6 +30,7 @@ impl Context {
     }
 }
 
+
 #[derive(Clone)]
 pub struct Implication {
     pub from: Vec<u128>,
@@ -35,7 +38,7 @@ pub struct Implication {
 }
 
 pub struct ImplicationSet {
-    M: usize,
+    pub M: usize,
     pub set: Vec<Implication>,
 }
 
@@ -164,14 +167,14 @@ pub fn remove(set: &mut Vec<u128>, elem: usize) {
 }
 
 #[inline]
-fn union(l: &mut Vec<u128>, e: &Vec<u128>) {
+pub fn union(l: &mut Vec<u128>, e: &Vec<u128>) {
     for i in 0..l.len() {
         l[i] = l[i] | e[i];
     }
 }
 
 #[inline]
-fn is_subset(sub: &Vec<u128>, set: &Vec<u128>) -> bool {
+pub fn is_subset(sub: &Vec<u128>, set: &Vec<u128>) -> bool {
     for i in 0..sub.len() {
         if !(sub[i] & (!set[i]) == 0_u128) {
             return false
@@ -244,7 +247,7 @@ pub fn pac_attribute_exploration(
     let mut K = K_0; // initial context
     let mut L = ImplicationSet {M, set: vec![]};
     let mut j = 1;
-    loop {
+    'main: loop {
         match probably_explored(M, &K, &L, eps, delta, j) {
             Some(mut imp) => {
                 for i in 0..M {  // transform it to (l -> r \ l)
@@ -252,23 +255,39 @@ pub fn pac_attribute_exploration(
                         remove(&mut imp.to, i);
                     }
                 }
+                println!("Member with L size {}", L.set.len());
                 match oracle.is_refuted(&imp) {
                     Some(pod) => {
                         K.context.push(pod);
                     }
                     None => {
-                        L.set.push(imp);
-                        /*
+                        let mut found = false;
+                        let mut k = 0_usize;
+                        while k < L.set.len() {
+                            if is_subset(&imp.from, &L.set[k].from) && is_subset(&L.set[k].to, &imp.to) {
+                                if !found {
+                                    L.set[k] = imp.clone();
+                                    found = true;
+                                } else {
+                                    L.set.swap_remove(k);
+                                }
+                            }
+                            k += 1;
+                        }
+                        if !found {
+                            L.set.push(imp);
+                        }
+
+
                         for i in 0..K.context.len() {
                             K.context[i].0 = L.close(&K.context[i].0);
                         }
-                        */
+
                     }
                 }
             },
             None => return (L, K),
         }
-        println!("Iteration {}", j);
         j += 1;
     }
 }
